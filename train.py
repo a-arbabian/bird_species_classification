@@ -12,6 +12,7 @@ from torchvision.transforms import Compose, ToTensor, Normalize, ColorJitter, Ra
 from torchvision.models import resnet34
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+
 from apex import amp
 
 from sklearn.model_selection import train_test_split
@@ -27,6 +28,7 @@ def train(model, loader, criterion, optimizer):
 
         optimizer.zero_grad()
         logits = model(imgs)
+
         loss = criterion(logits, targets)
         with amp.scale_loss(loss, optimizer) as scaled_loss:
             scaled_loss.backward()
@@ -38,9 +40,12 @@ def train(model, loader, criterion, optimizer):
     return train_loss
 
 
-def validate(model, loader, criterion):
+def validate(model, loader, criterion, total_set_size):
     model.eval()
     running_loss = 0.
+    running_correct = 0
+    softmax = torch.nn.Softmax(dim=1)
+
     for mini_batch in tqdm(loader, desc="Validating"):
         imgs = mini_batch['image'].cuda()
         targets = mini_batch['label'].cuda()
@@ -48,11 +53,19 @@ def validate(model, loader, criterion):
         with torch.no_grad():
             logits = model(imgs)
             loss = criterion(logits, targets)
+            running_loss += loss.item()
 
-        running_loss += loss.item()
+            # softmax across logits
+            preds = softmax(logits)
+            # argmax to get class prediction
+            preds = preds.argmax(dim=1)
+            
+            # add correct preds to running total
+            running_correct += (preds == targets).sum().item()
 
     val_loss = running_loss / len(loader)
-    return val_loss
+    val_acc = float(running_correct / total_set_size)
+    return val_loss, val_acc
 
 
 if __name__ == '__main__':
@@ -95,7 +108,7 @@ if __name__ == '__main__':
     net.fc = torch.nn.Linear(net.fc.in_features, len(dataset.classes))
     net.cuda()
     # MAKE OPTIMIZER
-    optimizer = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9, weight_decay=1e-4)
+    optimizer = torch.optim.SGD(net.parameters(), lr=0.1, momentum=0.9, weight_decay=1e-4)
     # MAKE CRITERION
     loss_fn = torch.nn.CrossEntropyLoss()  # takes raw logits
     # MAKE SCHEDULER
@@ -115,9 +128,9 @@ if __name__ == '__main__':
     for epoch in tqdm(range(EPOCHS), desc="Epochs"):
         train_loss = train(net, train_loader, loss_fn, optimizer)
         writer.add_scalar('loss/train', train_loss, epoch)
-
-        val_loss = validate(net, train_loader, loss_fn)
+        val_loss, val_acc = validate(net, train_loader, loss_fn, len(val_dataset))
         writer.add_scalar('loss/val', val_loss, epoch)
+        writer.add_scalar('acc/classification_acc', val_acc, epoch)
 
         writer.add_scalar('lr/train', optimizer.param_groups[0]['lr'], epoch)
         lr_scheduler.step(val_loss)
