@@ -44,7 +44,6 @@ def validate(model, loader, criterion, total_set_size):
     model.eval()
     running_loss = 0.
     running_correct = 0
-    softmax = torch.nn.Softmax(dim=1)
 
     for mini_batch in tqdm(loader, desc="Validating"):
         imgs = mini_batch['image'].cuda()
@@ -56,10 +55,10 @@ def validate(model, loader, criterion, total_set_size):
             running_loss += loss.item()
 
             # softmax across logits
-            preds = softmax(logits)
+            preds = torch.nn.functional.softmax(logits, dim=1)
             # argmax to get class prediction
             preds = preds.argmax(dim=1)
-            
+
             # add correct preds to running total
             running_correct += (preds == targets).sum().item()
 
@@ -128,7 +127,7 @@ if __name__ == '__main__':
     for epoch in tqdm(range(EPOCHS), desc="Epochs"):
         train_loss = train(net, train_loader, loss_fn, optimizer)
         writer.add_scalar('loss/train', train_loss, epoch)
-        val_loss, val_acc = validate(net, train_loader, loss_fn, len(val_dataset))
+        val_loss, val_acc = validate(net, val_loader, loss_fn, len(val_dataset))
         writer.add_scalar('loss/val', val_loss, epoch)
         writer.add_scalar('acc/classification_acc', val_acc, epoch)
 
